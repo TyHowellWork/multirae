@@ -1,0 +1,9 @@
+<!-- Distribution A. Approved for public release; distribution unlimited. OPSEC Number: 4944 -->
+<launch>
+  
+  <!-- Multirae driver-->
+  <param name="multirae/usb_port" value="/dev/ttyUSB0"/>
+  <param name="multirae/baudrate" value="9600"/>
+  <node pkg="multirae" type="multirae_node" name="multirae_driver" output="screen"/>
+
+</launch>
