@@ -93,11 +93,11 @@ sudo chmod a+rw /dev/ttyUSB0
 MultiRAE<sup>1</sup> https://sps.honeywell.com/us/en/products/safety/gas-and-flame-detection/portables/multirae
 
 ## Hardware Setup
-1. Purchase the sensor and travel charger (from either [Premier Safety](www.premiersafety.com) or [Accurate Safety](https://accsafety.com)).
+1. Purchase the sensor and travel charger.
 
-    MAB3-B8C102E-020	MultiRAE Lite: pumped, CO2/LEL/CO/O2, wired w/ Li-ion battery [need it configured for P2P (Point to Point) comms]	$2,322.77
+    MAB3-B8C102E-020	MultiRAE Lite: pumped, CO2/LEL/CO/O2, wired w/ Li-ion battery [need it configured for P2P (Point to Point) comms]
 
-    SAS-0003-000		P2P upgrade (the M01-0309-000 Travel charger piece [$210.00] is included with P2P upgrade)
+    SAS-0003-000		P2P upgrade (the M01-0309-000 Travel charger piece is included with P2P upgrade)
 
 2. Configure the sensor for P2P (Point 2 Point) communications:
 
