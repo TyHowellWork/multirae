@@ -388,10 +388,11 @@ int main(int argc, char **argv)
 
   ROS_INFO("connection initializing (%s) at %d baud", port.c_str(), baud);
   fpSerial = serialInit(port.c_str(), baud);
-  if (!fpSerial )
+  while(!fpSerial )
   {
-    ROS_ERROR("unable to create a new serial port");
-    return 1;
+    ROS_WARN("Unable to create a new serial port, check multirae connection, retrying in 10.0 seconds");
+    ros::Duration(10.0).sleep();
+    fpSerial = serialInit(port.c_str(), baud);
   }
   ROS_INFO("serial connection successful");
 
