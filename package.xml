@@ -1,3 +1,4 @@
+<?xml version="1.0"?>
 <!-- 
   
 Distribution A. Approved for public release; distribution unlimited. OPSEC Number: 4944 
@@ -32,7 +33,6 @@ DEALINGS IN THE SOFTWARE.
 #  limitations under the License.
 
 -->
-<?xml version="1.0"?>
 <package format="2">
   <name>multirae</name>
   <version>0.0.0</version>
@@ -59,7 +59,7 @@ DEALINGS IN THE SOFTWARE.
   <!-- Author tags are optional, multiple are allowed, one per tag -->
   <!-- Authors do not have to be maintainers, but could be -->
   <!-- Example: -->
-  <author email="">Ty Valascho</author>
+  <author>Ty Valascho</author>
 
 
   <!-- The *depend tags are used to specify dependencies -->
