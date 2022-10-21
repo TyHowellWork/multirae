@@ -2,8 +2,9 @@
 <launch>
   
   <!-- Multirae driver-->
-  <param name="multirae/usb_port" value="/dev/ttyUSB0"/>
-  <param name="multirae/baudrate" value="9600"/>
-  <node pkg="multirae" type="multirae_node" name="multirae_driver" output="screen"/>
+  <group ns="multirae">
+    <rosparam file="$(find multirae)/config/multirae.yaml" />
+    <node pkg="multirae" type="multirae_node" name="multirae_driver" respawn="true" output="screen"/>
+  </group>
 
 </launch>

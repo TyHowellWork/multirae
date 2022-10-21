@@ -29,6 +29,9 @@ Also, the serial port may not have correct privileges. Try the following, after 
 sudo chmod a+rw /dev/ttyUSB0 
 ```
 
+
+Make sure the device is set to a consistent path (e.g.) with udev rules. Otherwise the device may be set to a different path if it is disconnected and reconnected. It may be necessary to specify the device serial number in this rule because it uses a generic UART bridge.
+
 ## ROS API
 
 ## Nodes
@@ -39,43 +42,24 @@ sudo chmod a+rw /dev/ttyUSB0
 
 `~/multirae/CI2` ([std\_msgs/Float32](http://docs.ros.org/en/melodic/api/std_msgs/html/msg/Float32.html))
 
-- The current CI2 reading.
-
 `~/multirae/CO` ([std\_msgs/Float32](http://docs.ros.org/en/melodic/api/std_msgs/html/msg/Float32.html))
-
-- The current CO reading.
 
 `~/multirae/CO2` ([std\_msgs/Float32](http://docs.ros.org/en/melodic/api/std_msgs/html/msg/Float32.html))
 
-- The current CO2 reading.
-
 `~/multirae/HCN` ([std\_msgs/Float32](http://docs.ros.org/en/melodic/api/std_msgs/html/msg/Float32.html))
-
-- The current HCN reading.
 
 `~/multirae/H2S` ([std\_msgs/Float32](http://docs.ros.org/en/melodic/api/std_msgs/html/msg/Float32.html))
 
-- The current H2S reading.
-
 `~/multirae/LEL` ([std\_msgs/Float32](http://docs.ros.org/en/melodic/api/std_msgs/html/msg/Float32.html))
-
-- The current LEL reading.
 
 `~/multirae/NH3` ([std\_msgs/Float32](http://docs.ros.org/en/melodic/api/std_msgs/html/msg/Float32.html))
 
-- The current NH3 reading.
-
 `~/multirae/OXY` ([std\_msgs/Float32](http://docs.ros.org/en/melodic/api/std_msgs/html/msg/Float32.html))
-
-- The current OXY reading.
 
 `~/multirae/SO2` ([std\_msgs/Float32](http://docs.ros.org/en/melodic/api/std_msgs/html/msg/Float32.html))
 
-- The current SO2 reading.
-
 `~/multirae/VOC` ([std\_msgs/Float32](http://docs.ros.org/en/melodic/api/std_msgs/html/msg/Float32.html))
 
-- The current VOC reading.
 #### Subscribed Topics
 
 - None
@@ -88,7 +72,9 @@ sudo chmod a+rw /dev/ttyUSB0
 
 `~/multirae/usb_port` (`String`, default: "/dev/ttyUSB1")
 
-- USB port to interface with sensor.
+`~/multirae/baud_rate` (`Int`, default: 9600)
+
+`~/multirae/poll_rate` (`Int`, default: 1)
 
 MultiRAE<sup>1</sup> https://sps.honeywell.com/us/en/products/safety/gas-and-flame-detection/portables/multirae
 
@@ -121,7 +107,3 @@ MultiRAE<sup>1</sup> https://sps.honeywell.com/us/en/products/safety/gas-and-fla
 
 6. To flash with the P2P functionality, you'll need to purchase the MultiRAE upgrade kit "SAS-0003-000" which includes the M01-0309-000 travel charger needed for RS232 serial communication.  THe "regular" travel charger M01-3021-000 is USB only and cannot be used for P2P functionality.  Follow the procedure in P2P process.docx to flash with P2P serial upgrade
 
-
-
-
-        

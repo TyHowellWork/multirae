@@ -42,384 +42,164 @@
  *****************************************************************************/
 
 #include <ros/ros.h>
-#include "std_msgs/String.h"
-#include "std_msgs/UInt8MultiArray.h"
-#include "std_msgs/Float32.h"
-#include <sstream>
-#include <pthread.h>
-#include <sys/types.h>
-#include <sys/time.h>
+#include <std_msgs/Float32.h>
 #include <fcntl.h>
 #include <termios.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <string>
 
-#define DEFAULT_BAUDRATE 9600
-const int NUMBER_OF_SENSORS = 20;
+// boilerplate error handling
+#define FAIL(REASON)          \
+do {                          \
+    ROS_ERROR_STREAM(REASON); \
+    close(serial_port);       \
+    r.sleep();                \
+    goto INIT_DEVICE;         \
+} while (0)
 
-timespec sleep_time_100ms;
-timespec sleep_time_1ms;
 
-// Global data
-FILE *fpSerial = NULL;
+int serialInit(const char *port_name, int baud);
 
-ros::Publisher CI2;
-ros::Publisher CO2;
-ros::Publisher CO;
-ros::Publisher HCN;
-ros::Publisher H2S;
-ros::Publisher LEL;
-ros::Publisher NH3;
-ros::Publisher OXY;
-ros::Publisher SO2;
-ros::Publisher VOC;
 
-int ucIndex;
+int main( int argc, char* argv[]) {
 
-// Initialize serial port, return file descriptor
-FILE *serialInit(const char * port, int baud)
-{
-  int BAUD = 0;
-  int fd = -1;
-  struct termios newtio;
-  FILE *fp = NULL;
+  ros::init(argc, argv, "multirae");
+  ros::NodeHandle nh;
+  // Attempt to use ROS parameters
+  std::string port = "/dev/ttyUSB0";
+  if (ros::param::get("usb_port", port))
+    ROS_INFO("USB Port name read from parameter server: %s", port.c_str());
+  else
+    ROS_WARN("USB Port name not read from parameter server, using default %s", port.c_str());
 
-  // Open the serial port as a file descriptor for low level configuration
-  // read/write, not controlling terminal for process,
-  fd = open(port, O_RDWR | O_NOCTTY | O_NDELAY);
-  if (fd < 0)
-  {
-    ROS_ERROR("serialInit: Could not open serial device %s", port);
-    return fp;
+  int baud = 9600;
+  if (ros::param::get("baud_rate", baud))
+    ROS_INFO("Baudrate read from parameter server: %d", baud);
+  else
+    ROS_WARN("Baudrate not read from parameter server, using default %d", baud);
+
+  int poll_rate = 1;
+  if (ros::param::get("poll_rate", poll_rate))
+    ROS_INFO("Poll rate read from parameter server: %d", poll_rate);
+  else
+    ROS_WARN("Poll rate not read from parameter server, using default %d", poll_rate);
+  ros::Rate r(poll_rate);
+
+  INIT_DEVICE:                                                                 // Any fatal error will return to this point to re-initialize the device
+  int bytes_read = 0;
+  int serial_port = -1;
+  struct timeval Timeout;
+  Timeout.tv_sec = 0;
+  fd_set read_fds;
+  char read_buf[256];
+  unsigned char msg = 'n';
+  do{
+    ROS_INFO("connection initializing (%s) at %d baud", port.c_str(), baud);
+    serial_port = serialInit(port.c_str(), baud);                              // Attempt to open serial port
+    if(serial_port < 0)
+      FAIL("Unable to initialize serial port");
+    FD_ZERO(&read_fds);
+    FD_SET(serial_port, &read_fds);                                            // Create file descriptor set so `select` can check for ready data
+
+    write(serial_port, &msg, 1);                                               // Send 'n' to get sensor names
+    Timeout.tv_usec = ((1.0/poll_rate)*1000000);                               // Set timeout to match poll rate
+    if(select(serial_port+1, &read_fds, NULL, NULL, &Timeout) == 1)            // Wait a max period of 'timeout' for a line to become available
+      bytes_read = read(serial_port, &read_buf, sizeof(read_buf));             // Read in a line of sensor names
+  }while (bytes_read <= 0);
+
+  ROS_INFO("Successfully initialized");
+
+  read_buf[bytes_read-2] = '\0';                                               // Truncate "\r\n" with null terminator
+  std::istringstream iss(read_buf);                                            // Create string stream for parsing
+  std::string sensor_name;
+  std::vector<ros::Publisher> publishers;
+  while (std::getline(iss, sensor_name, '\t'))                                 // Split the line by tab characters and create a publisher for each
+    publishers.push_back(nh.advertise<std_msgs::Float32>(sensor_name, 100));
+
+  ROS_INFO("Measuring sensors");
+  msg='r';
+  while (ros::ok()){
+    write(serial_port, &msg, 1);                                               // Send 'r' to refresh data
+    Timeout.tv_usec = ((1.0/poll_rate)*1000000);                               // reset timeout
+    if(select(serial_port+1, &read_fds, NULL, NULL, &Timeout) == 1){           // Wat a max period of 'timeout' for a line to become available
+      read(serial_port, NULL, 1);                                              // The multirae helpfully null-terminates its strings, but in canonical mode we don't want those because \n marks the end of transmission
+      bytes_read = read(serial_port, &read_buf, sizeof(read_buf));             // Read in the line of sensor data
+    }
+    else
+      FAIL("Serial device timeout");
+    if (bytes_read <= 0)
+      FAIL("Error reading from device");
+
+    read_buf[bytes_read-2] = '\0';                                             // Truncate "\r\n" with null terminator
+    iss = std::istringstream(read_buf);                                        // Create string stream for parsing
+    std::string sensor_reading;
+    for(ros::Publisher pub : publishers){                                      // Loop through publishers
+      std::getline(iss, sensor_reading, '\t');                                   // Extract data substring separated by tab character
+      if(sensor_reading=="N/A"){                                                 // Catch non-ready sensors
+        ROS_WARN_STREAM("Sensor for "<<pub.getTopic()<<" is not yet running");
+        continue;
+      }
+      std_msgs::Float32 ros_msg;
+      ros_msg.data=std::stod(sensor_reading);                                    // Create ROS message and convert data string to double
+      pub.publish(ros_msg);                                                      // Publish
+    }
+    r.sleep();
   }
 
-  // set up new settings
-  memset(&newtio, 0, sizeof(newtio));
-  newtio.c_cflag =  CS8 | CLOCAL | CREAD;  // no parity, 1 stop bit
-  newtio.c_iflag = IGNCR;    // ignore CR, other options off
-  newtio.c_iflag |= IGNBRK;  // ignore break condition
-  newtio.c_oflag = 0;        // all options off
+  close(serial_port);
+  return 0;
+};
 
-  // activate new settings
-  tcflush(fd, TCIFLUSH);
-  // Look up appropriate baud rate constant
-  switch (baud)
+
+
+int serialInit(const char *port_name, int baud)
+{
+  int serial_port = open("/dev/ttyUSB0", O_RDWR | O_NOCTTY);         // Open device read/write
+  if (serial_port < 0)
+    return -1;
+  struct termios tty;                                                // Holds terminal settings
+
+  if(tcgetattr(serial_port, &tty) != 0)                              // Read in existing settings
+    return -2;
+
+  tty.c_cflag = CS8 | CREAD | CLOCAL;                                // no parity, 1 stop bit
+
+  tty.c_lflag = ICANON;                                              // Canonical mode - receive data in lines, buffer becomes available to read when newline received
+  tty.c_lflag &= ~ISIG;                                              // Disable INTR, QUIT and SUSP
+  tty.c_iflag &= ~(IXON | IXOFF | IXANY);                            // No flow control
+  tty.c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP|INLCR|IGNCR|ICRNL);   // Disable special handling of received bytes
+
+  switch (baud)                                                      // Look up baud rate constant
   {
     case 38400:
       default:
-        BAUD = B38400;
+        baud = B38400;
         break;
     case 19200:
-        BAUD  = B19200;
+        baud  = B19200;
         break;
     case 9600:
-        BAUD  = B9600;
+        baud  = B9600;
         break;
     case 4800:
-        BAUD  = B4800;
+        baud  = B4800;
         break;
     case 2400:
-        BAUD  = B2400;
+        baud  = B2400;
         break;
     case 1800:
-        BAUD  = B1800;
+        baud  = B1800;
         break;
     case 1200:
-        BAUD  = B1200;
+        baud  = B1200;
         break;
-  }  // end of switch baud_rate
-
-  if (cfsetispeed(&newtio, BAUD) < 0 || cfsetospeed(&newtio, BAUD) < 0)
-  {
-      ROS_ERROR("serialInit: Failed to set serial baud rate: %d", baud);
-      close(fd);
-      return NULL;
-  }
-  tcsetattr(fd, TCSANOW, &newtio);
-  tcflush(fd, TCIOFLUSH);
-
-  // Open file as a standard I/O stream
-  fp = fdopen(fd, "r+");  // "r+ = read and write access
-  if (!fp)
-  {
-      ROS_ERROR("serialInit: Failed to open serial stream %s", port);
-      fp = NULL;
-  }
-  return fp;
-}  // serialInit
-
-unsigned char sensed_distances[NUMBER_OF_SENSORS];
-
-// Receive command responses from robot uController
-// and publish as a ROS message
-void *rcvThread(void *arg)
-{
-  const int kRcvBufSize = 1000;  // Buffer some messages
-  char rcvBuffer[kRcvBufSize];  // response string from uController
-  char *bufPos = NULL;
-  std_msgs::UInt8MultiArray msgArray;
-  msgArray.layout.dim.push_back(std_msgs::MultiArrayDimension());
-  msgArray.layout.dim[0].size = NUMBER_OF_SENSORS;
-  msgArray.layout.dim[0].stride = 1;
-  msgArray.layout.dim[0].label = "multirae_sensor_data";
-
-  ROS_INFO("rcvThread: receive thread running");
-
-  // Number of times to try character reads on the serial bus
-  int max_num_serial_reads = 1000;
-
-  // sensor_names = Array of up to NUMBER_OF_SENSORS sensors, where
-  // row 0 = sensor number in serial message
-  // row 1 = name of the sensor, max of five characters
-  char sensor_names[NUMBER_OF_SENSORS][5];
-  memset(sensor_names, 0x00, sizeof(sensor_names));  // Set the whole array to 0x00
-
-  // sensor_values = Array of up to NUMBER_OF_SENSORS values, where
-  // row 0 = sensor number in serial message
-  // row 1 = sensed value, max of 10 characters, stored as an array of characters
-  char sensor_values[NUMBER_OF_SENSORS][10];
-  memset(sensor_values, 0x00, sizeof(sensor_names));  // Set the whole array to 0x00
-
-  unsigned char recd_char = 0;
-  int rcvBufferCounter = 0;
-  int j = 0;
-
-  // Clear buffer before use by filling with invalids (zeros)
-  memset(rcvBuffer, 0x00, kRcvBufSize);
-  unsigned int number_sensors_present = 0;
-  unsigned int char_cntr = 0;
-
-  while (ros::ok())
-  {
-    // Read which sensors are present and the order
-    fprintf(fpSerial, "%s", "N");  // Send the cmd "N" for Sensor Name
-
-    for (int cntr = 0; cntr < max_num_serial_reads; cntr++)
-    {
-      // Parse the messages
-      recd_char = fgetc(fpSerial);
-
-      if (recd_char == '\0')
-      {
-        // End of the serial message, break from reading the message
-        cntr = max_num_serial_reads;
-      }
-      else if (recd_char == 0x00)
-      {
-        ROS_INFO("NULL");
-      }
-      else if ((recd_char == 0xFF) || (recd_char == '\n'))
-      {
-        // Do nothing - this is blank space in the message
-      }
-      else if (recd_char == 0x09)
-      {
-        // Spaces separate the items and delineate the different sensors
-        // Increment to the next sensor
-        number_sensors_present++;
-        char_cntr = 0;
-      }
-      else
-      {
-        // This character is part of the sensor name
-        sensor_names[number_sensors_present][char_cntr] = recd_char;
-        char_cntr++;
-      }
-
-      // Slight pause was necessary in between reads
-      if (nanosleep(&sleep_time_1ms, &sleep_time_1ms) == -1)
-          {
-        ROS_ERROR("Woke up from sleep too soon.");
-      }
-    }
-
-    if (nanosleep(&sleep_time_100ms, &sleep_time_100ms) == -1)
-    {
-      ROS_ERROR("Woke up from sleep too soon.");
-    }
-
-
-    while (1)
-    {
-      // Clear buffer before use by filling with invalids (zeros)
-      memset(rcvBuffer, 0x00, kRcvBufSize);
-      // R = Instant (Sensor) Reading - asks for the sensed values
-      fprintf(fpSerial, "%s", "R");
-      number_sensors_present = 0;
-      char_cntr = 0;
-      for (int cntr = 0; cntr < max_num_serial_reads; cntr++)
-      {
-        recd_char = fgetc(fpSerial);
-        if (recd_char == '\0')  // 0x00
-        {
-          cntr = max_num_serial_reads;
-        }
-        else if (recd_char == 0x00)
-        {
-          ROS_INFO("NULL");
-        }
-        else if (recd_char == 0xFF)
-        {
-          // Do nothing - this is blank space
-        }
-        else if (recd_char == 0x09)
-        {
-          // Spaces separate the items
-          number_sensors_present++;
-          char_cntr = 0;
-        }
-        else
-        {
-          sensor_values[number_sensors_present][char_cntr] = recd_char;
-          char_cntr++;
-        }
-
-        if (nanosleep(&sleep_time_1ms, &sleep_time_1ms) == -1)
-        {
-          ROS_ERROR("Woke up from sleep too soon.");
-        }
-      }
-
-      for (int i = 0; i < NUMBER_OF_SENSORS; i++)
-      {
-        if (sensor_names[i][0] != 0x00)
-        {
-          std_msgs::Float32 msg;
-          msg.data = strtof(sensor_values[i], NULL);
-          // Brute force method of finding the correct sensor by name and publishing it
-          if (strcmp(sensor_names[i], "CI2") == 0x00)
-          {
-            CI2.publish(msg);
-          }
-          else if (strcmp(sensor_names[i], "CO2") == 0x00)
-          {
-            CO2.publish(msg);
-          }
-          else if (strcmp(sensor_names[i], "CO") == 0x00)
-          {
-            CO.publish(msg);
-          }
-          else if (strcmp(sensor_names[i], "HCN") == 0x00)
-          {
-            HCN.publish(msg);
-          }
-          else if (strcmp(sensor_names[i], "H2S") == 0x00)
-          {
-            H2S.publish(msg);
-          }
-          else if (strcmp(sensor_names[i], "LEL") == 0x00)
-          {
-            LEL.publish(msg);
-          }
-          else if (strcmp(sensor_names[i], "NH3") == 0x00)
-          {
-            NH3.publish(msg);
-          }
-          else if (strcmp(sensor_names[i], "OXY") == 0x00)
-          {
-            OXY.publish(msg);
-          }
-          else if (strcmp(sensor_names[i], "SO2") == 0x00)
-          {
-            SO2.publish(msg);
-          }
-          else if (strcmp(sensor_names[i], "VOC") == 0x00)
-          {
-            VOC.publish(msg);
-          }
-        }
-        else
-        {
-          // There are no more sensors in the serial messages
-          i = NUMBER_OF_SENSORS;
-        }
-      }
-      // sleep for a second, this reduces the burden on the robot's processor
-      sleep(1);
-    }
-  }
-    return NULL;
-}  // rcvThread
-
-
-int main(int argc, char **argv)
-{
-  // Init the ROS system
-  ros::init(argc, argv, "multirae");
-
-  // Establish this as a ROS node
-  ros::NodeHandle rosNode;
-
-  ROS_INFO_STREAM("multirae started");
-
-  // default usb port name
-  std::string port = "/dev/ttyUSB1";
-
-  if (ros::param::get("/multirae/usb_port", port) == true)
-  {
-    ROS_INFO("USB Port name read from Parameter Server: %s", port.c_str());
-  }
-  else
-  {
-    ROS_INFO("USB Port name not read from Parameter Server, using default %s", port.c_str());
   }
 
-  // baud rate
-  int baud = 9600;
-  if (ros::param::get("/multirae/baudrate", baud) == true)
-  {
-    ROS_INFO("Baudrate read from Parameter Server: %d", baud);
-  }
-  else
-  {
-    ROS_INFO("Baudrate not read from Parameter Server, using default %d", baud);
-  }
+  if (cfsetispeed(&tty, baud) < 0 || cfsetospeed(&tty, baud) < 0)    // Set port speed
+    return -3;
 
-  sleep_time_100ms.tv_nsec = 100000000;
-  sleep_time_100ms.tv_sec = 0;
-  sleep_time_1ms.tv_nsec = 1000000;
-  sleep_time_1ms.tv_sec = 0;
+  if (tcsetattr(serial_port, TCSANOW, &tty) != 0)                    // Apply settings
+    return -4;
 
-  // receive thread ID
-  pthread_t rcvThrID;
-  int err = -1;
+  tcflush(serial_port, TCIOFLUSH);                                   // Clear out any stale data
 
-  ROS_INFO("connection initializing (%s) at %d baud", port.c_str(), baud);
-  fpSerial = serialInit(port.c_str(), baud);
-  while(!fpSerial )
-  {
-    ROS_WARN("Unable to create a new serial port, check multirae connection, retrying in 10.0 seconds");
-    ros::Duration(10.0).sleep();
-    fpSerial = serialInit(port.c_str(), baud);
-  }
-  ROS_INFO("serial connection successful");
-
-  // Setup to publish ROS messages
-  CI2 = rosNode.advertise<std_msgs::Float32>("multirae/CI2", 100);
-  CO2 = rosNode.advertise<std_msgs::Float32>("multirae/CO2", 100);
-  CO = rosNode.advertise<std_msgs::Float32>("multirae/CO", 100);
-  HCN = rosNode.advertise<std_msgs::Float32>("multirae/HCN", 100);
-  H2S = rosNode.advertise<std_msgs::Float32>("multirae/H2S", 100);
-  LEL = rosNode.advertise<std_msgs::Float32>("multirae/LEL", 100);
-  NH3 = rosNode.advertise<std_msgs::Float32>("multirae/NH3", 100);
-  OXY = rosNode.advertise<std_msgs::Float32>("multirae/OXY", 100);
-  SO2 = rosNode.advertise<std_msgs::Float32>("multirae/SO2", 100);
-  VOC = rosNode.advertise<std_msgs::Float32>("multirae/VOC", 100);
-
-  // Create receive thread
-  err = pthread_create(&rcvThrID, NULL, rcvThread, NULL);
-  if (err != 0)
-  {
-    ROS_ERROR("unable to create receive thread");
-    return 1;
-  }
-
-  // Process ROS messages and send serial commands to uController
-  ros::spin();
-
-  fclose(fpSerial);
-  ROS_INFO("r2Serial stopping");
-  ROS_INFO_STREAM("multirae ended");
+  return serial_port;
 }
