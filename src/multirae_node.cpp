@@ -119,7 +119,7 @@ int main( int argc, char* argv[]) {
   while (ros::ok()){
     write(serial_port, &msg, 1);                                               // Send 'r' to refresh data
     Timeout.tv_usec = ((1.0/poll_rate)*1000000);                               // reset timeout
-    if(select(serial_port+1, &read_fds, NULL, NULL, &Timeout) == 1){           // Wat a max period of 'timeout' for a line to become available
+    if(select(serial_port+1, &read_fds, NULL, NULL, &Timeout) == 1){           // Wait a max period of 'timeout' for a line to become available
       read(serial_port, &read_buf, 1);                                         // The multirae helpfully null-terminates its strings, but in canonical mode we don't want those because \n marks the end of transmission
       bytes_read = read(serial_port, &read_buf, sizeof(read_buf));             // Read in the line of sensor data
     }
